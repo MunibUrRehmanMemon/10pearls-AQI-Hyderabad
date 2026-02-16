@@ -1,0 +1,35 @@
+name: Daily Model Training
+
+on:
+  schedule:
+    - cron: '0 20 * * *'  # 1:00 AM PKT (UTC+5) = 20:00 UTC
+  workflow_dispatch:       # Manual trigger
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run data ingestion (refresh before training)
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: python -m src.features.ingest_data
+
+      - name: Train models
+        env:
+          MONGO_URI: ${{ secrets.MONGO_URI }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+        run: python -m src.models.train_forecast_model
