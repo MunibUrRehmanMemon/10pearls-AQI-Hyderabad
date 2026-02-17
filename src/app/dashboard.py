@@ -12,7 +12,6 @@ from datetime import timedelta
 import sys
 import os
 import math
-import subprocess
 
 # SHAP imports
 import shap
@@ -37,30 +36,6 @@ from src.features.forecast import fetch_weather_forecast_data
 from src.prediction.clean_forecast import clean_forecast  # NEW: Clean forecasting
 import src.config as config
 
-
-# ===== SIDEBAR CONTROLS =====
-st.sidebar.title("⚙️ Control Panel")
-
-if st.sidebar.button("🔄 Refresh Data (Fetch Latest)"):
-    with st.spinner("Fetching latest data... This may take a minute."):
-        try:
-            # Use sys.executable to ensure we use the same python env
-            result = subprocess.run(
-                [sys.executable, "-m", "src.features.ingest_data"],
-                capture_output=True,
-                text=True,
-                check=False
-            )
-            if result.returncode == 0:
-                st.success("✅ Data updated successfully! Reloading...")
-                st.rerun()
-            else:
-                st.error("❌ Data update failed!")
-                st.code(result.stderr)
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-st.sidebar.markdown("---")
 
 # ===== HELPER FUNCTIONS =====
 

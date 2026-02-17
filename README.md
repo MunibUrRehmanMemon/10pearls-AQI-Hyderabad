@@ -56,11 +56,11 @@ Open-Meteo APIs (Weather + Air Quality)
 
 Three models are trained and compared. The best performing model is automatically selected:
 
-| Model | R² | MAE | RMSE |
-|-------|-----|-----|------|
-| **LightGBM** | 0.874 | 6.58 | 9.13 |
-| XGBoost | 0.842 | 7.20 | 10.23 |
-| RandomForest | 0.748 | 10.08 | 12.94 |
+| Model | R² | MAE (AQI) | RMSE (AQI) |
+|-------|-----|-----------|------------|
+| **LightGBM** | 0.8743 | 6.58 | 9.13 |
+| XGBoost | 0.8423 | 7.20 | 10.23 |
+| RandomForest | 0.7476 | 10.08 | 12.94 |
 
 ## CI/CD
 
@@ -83,6 +83,8 @@ Three models are trained and compared. The best performing model is automaticall
 │   │   └── clean_forecast.py     # 72h recursive forecast
 │   └── app/
 │       └── dashboard.py          # Streamlit dashboard
+├── notebooks/
+│   └── EDA.ipynb                 # Exploratory data analysis
 ├── .github/workflows/
 │   ├── hourly_ingestion.yml
 │   └── daily_training.yml

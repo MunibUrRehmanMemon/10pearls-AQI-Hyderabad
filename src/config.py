@@ -1,15 +1,17 @@
-"""
-Configuration for AQI Predictor - Hyderabad, Sindh, Pakistan
-"""
 import os
+from dotenv import load_dotenv
 
-# Location
-CITY = "Hyderabad"
-LAT = 25.396
+# Load the .env file
+load_dotenv()
+
+# Global Variables
+MONGO_URI = os.getenv("MONGO_URI")
+DB_NAME = os.getenv("DB_NAME", "10pearls-aqi")
+
+# Hyderabad, Sindh Coordinates
+LAT = 25.3960
 LON = 68.3578
 
-# MongoDB
-MONGO_URI = os.getenv("MONGO_URI", os.getenv("MONGODB_URI", ""))
-DB_NAME = os.getenv("DB_NAME", "aqi_predictor")
+# Collections
 FEATURE_COLLECTION = "hyderabad_features"
-FORECAST_COLLECTION = "weather_forecast"
+MODEL_COLLECTION = "model_registry"

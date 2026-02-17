@@ -9,3 +9,6 @@ joblib>=1.3.0
 streamlit>=1.28.0
 plotly>=5.17.0
 python-dotenv>=1.0.0
+matplotlib>=3.7.0
+seaborn>=0.12.0
+shap>=0.42.0
