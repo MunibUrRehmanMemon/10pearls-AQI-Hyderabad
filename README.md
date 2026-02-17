@@ -8,7 +8,7 @@ A machine learning system that predicts the **US Air Quality Index (AQI)** for H
 
 ## What It Does
 
-Every hour, the system pulls the latest weather and air quality readings from Open-Meteo. Once a day at 1 AM PKT, it retrains three ML models using `RandomizedSearchCV` with `TimeSeriesSplit` cross-validation, picks the best one by MAE, and stores it in MongoDB. The dashboard then loads that best model and runs recursive 72-hour predictions — no manual intervention needed.
+Every hour, the system pulls the latest weather and air quality readings from Open-Meteo. Once a day at 1 AM PKT, it retrains three ML models using the best hyperparameters discovered during EDA (via `RandomizedSearchCV` with `TimeSeriesSplit`), picks the best one by MAE, and stores it in MongoDB. The dashboard then loads that best model and runs recursive 72-hour predictions — no manual intervention needed.
 
 The predictions are visualized alongside Open-Meteo's own AQI forecast so you can see how our model compares against the data source itself.
 
@@ -16,24 +16,24 @@ The predictions are visualized alongside Open-Meteo's own AQI forecast so you ca
 
 ## Model Performance
 
-Three models are trained daily with automated hyperparameter tuning. The best model is selected dynamically based on the lowest Mean Absolute Error:
+Three models are trained daily using EDA-tuned hyperparameters. The best model is selected dynamically based on the lowest Mean Absolute Error:
 
 | Model | R² | MAE | RMSE | Status |
 |-------|-----|-----|------|--------|
-| LightGBM | 0.871 | 6.70 | 9.27 | — |
-| **XGBoost** | 0.872 | 6.54 | 9.23 | Best |
-| RandomForest | 0.852 | 7.10 | 9.94 | — |
+| **LightGBM** | 0.863 | 6.71 | 9.54 | Best |
+| XGBoost | 0.833 | 7.64 | 10.55 | — |
+| RandomForest | 0.740 | 10.35 | 13.18 | — |
 
-> These scores reflect the latest training run. Since training happens daily with fresh data and randomized hyperparameter search, exact values shift slightly over time as the model adapts to changing conditions.
+> These scores reflect the latest production training run. Since training happens daily with fresh data, exact values shift slightly over time. The hyperparameters were tuned once during EDA and are reused for fast, reliable daily training.
 
-On a 0–500 AQI scale, a MAE of ~6.5 points means the model is typically within one sub-category of the true reading. It reliably captures transitions between Good, Moderate, and Unhealthy for Sensitive Groups — the three most common categories in Hyderabad. After hyperparameter tuning, all three models perform closely, with XGBoost edging ahead.
+On a 0–500 AQI scale, a MAE of ~6.7 points means the model is typically within one sub-category of the true reading. LightGBM reliably captures transitions between Good, Moderate, and Unhealthy for Sensitive Groups — the three most common categories in Hyderabad.
 
 ---
 
 ## Features
 
 - **28 engineered features** across 6 groups (weather, pollutants, cyclical time, explicit time, lag/rolling, interactions)
-- **Hyperparameter tuning** via `RandomizedSearchCV` (20 iterations per model, `TimeSeriesSplit` CV)
+- **EDA-tuned hyperparameters** via `RandomizedSearchCV` (20 iter, `TimeSeriesSplit` CV), with `--tune` flag to re-optimize
 - **Recursive forecasting** — predictions feed back into lag features for the next hour
 - **Real data boundary detection** — the system knows where measured data ends and forecasts begin
 - **Interactive dashboard** with AQI category zones, model comparison, and SHAP analysis

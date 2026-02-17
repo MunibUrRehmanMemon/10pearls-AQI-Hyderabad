@@ -9,10 +9,13 @@ Features: Based on EDA findings (see notebooks/EDA.ipynb)
 - Lag: us_aqi_lag_24h, rolling_mean_24h, rolling_std_24h
 - Interactions: wind_x_temp, humidity_x_temp, etc.
 
-Hyperparameters are tuned dynamically via RandomizedSearchCV with
-TimeSeriesSplit cross-validation. No hardcoded params — the best
-configuration is selected each training run and stored in the
-model registry metadata.
+Training Modes:
+  Default:  Uses best hyperparameters discovered during EDA (fast, ~10s)
+  --tune:   Re-runs RandomizedSearchCV to find new best params (slow, ~5-10min)
+
+Best params were found via RandomizedSearchCV with TimeSeriesSplit(n_splits=3)
+and 20 iterations in the EDA notebook. Use --tune to re-optimize if the data
+distribution changes significantly over time.
 
 All 3 models are saved to MongoDB model registry.
 The best model (by MAE) is also saved as 'best_model'.
@@ -21,7 +24,6 @@ The best model (by MAE) is also saved as 'best_model'.
 import pandas as pd
 import numpy as np
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import lightgbm as lgb
 from sklearn.ensemble import RandomForestRegressor
 from datetime import datetime
@@ -121,8 +123,14 @@ def prepare_data(df, target_col=TARGET_COL):
     return X, y, list(X.columns)
 
 
-def get_model_search_spaces():
-    """Define the 3 models with their hyperparameter search spaces."""
+def get_tuned_models():
+    """
+    Return the 3 models with best hyperparameters from EDA tuning.
+    
+    These params were found via RandomizedSearchCV (20 iter, TimeSeriesSplit 
+    n_splits=3, scoring=neg_mean_absolute_error) in notebooks/EDA.ipynb.
+    Used by default for fast daily training (~10s vs ~5-10min).
+    """
     try:
         import xgboost as xgb
         xgb_available = True
@@ -130,9 +138,48 @@ def get_model_search_spaces():
         xgb_available = False
         print("[WARNING] XGBoost not installed. pip install xgboost")
     
+    models = {}
+    
+    # 1. LightGBM — EDA best params
+    models['LightGBM'] = lgb.LGBMRegressor(
+        n_estimators=500, max_depth=12, learning_rate=0.03,
+        subsample=0.8, colsample_bytree=0.8, min_child_samples=20,
+        reg_alpha=0.01, reg_lambda=0.1,
+        random_state=42, n_jobs=-1, verbose=-1
+    )
+    
+    # 2. XGBoost — EDA best params
+    if xgb_available:
+        models['XGBoost'] = xgb.XGBRegressor(
+            n_estimators=700, max_depth=8, learning_rate=0.03,
+            subsample=0.9, colsample_bytree=0.8,
+            reg_alpha=0.01, reg_lambda=0.1,
+            random_state=42, n_jobs=-1, verbosity=0
+        )
+    
+    # 3. RandomForest — EDA best params
+    models['RandomForest'] = RandomForestRegressor(
+        n_estimators=500, max_depth=20, min_samples_split=5,
+        min_samples_leaf=3, max_features='sqrt',
+        random_state=42, n_jobs=-1
+    )
+    
+    return models
+
+
+def get_model_search_spaces():
+    """
+    Define hyperparameter search spaces for --tune mode.
+    Only called when user explicitly wants to re-optimize params.
+    """
+    try:
+        import xgboost as xgb
+        xgb_available = True
+    except ImportError:
+        xgb_available = False
+    
     spaces = {}
     
-    # 1. LightGBM
     spaces['LightGBM'] = {
         'estimator': lgb.LGBMRegressor(random_state=42, n_jobs=-1, verbose=-1),
         'params': {
@@ -147,7 +194,6 @@ def get_model_search_spaces():
         }
     }
     
-    # 2. XGBoost
     if xgb_available:
         spaces['XGBoost'] = {
             'estimator': xgb.XGBRegressor(random_state=42, n_jobs=-1, verbosity=0),
@@ -162,7 +208,6 @@ def get_model_search_spaces():
             }
         }
     
-    # 3. RandomForest
     spaces['RandomForest'] = {
         'estimator': RandomForestRegressor(random_state=42, n_jobs=-1),
         'params': {
@@ -177,10 +222,17 @@ def get_model_search_spaces():
     return spaces
 
 
-def train_all_models():
-    """Train all 3 models with RandomizedSearchCV and save to registry."""
+def train_all_models(tune=False):
+    """
+    Train all 3 models and save to MongoDB registry.
+    
+    Args:
+        tune: If True, run RandomizedSearchCV to find new best params (slow).
+              If False (default), use EDA-tuned params (fast).
+    """
+    mode = "HYPERPARAMETER TUNING" if tune else "EDA-TUNED PARAMS"
     print("\n" + "=" * 70)
-    print("  TRAINING 3 FORECAST MODELS (with Hyperparameter Tuning)")
+    print(f"  TRAINING 3 FORECAST MODELS ({mode})")
     print(f"  Target: {TARGET_COL}")
     print("=" * 70)
     
@@ -216,63 +268,98 @@ def train_all_models():
     
     print(f"Train: {len(X_train)} | Test: {len(X_test)}")
     
-    # TimeSeriesSplit for cross-validation (respects temporal order)
-    tscv = TimeSeriesSplit(n_splits=3)
-    
-    # Get model search spaces
-    model_spaces = get_model_search_spaces()
     results = {}
     best_mae = float('inf')
     best_name = None
-    
-    for name, spec in model_spaces.items():
-        print(f"\n--- Tuning {name} (20 iterations, 3-fold TimeSeriesSplit) ---")
+
+    if tune:
+        # --- TUNE MODE: RandomizedSearchCV to discover best params ---
+        from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
+        tscv = TimeSeriesSplit(n_splits=3)
+        model_spaces = get_model_search_spaces()
         
-        search = RandomizedSearchCV(
-            estimator=spec['estimator'],
-            param_distributions=spec['params'],
-            n_iter=20,
-            cv=tscv,
-            scoring='neg_mean_absolute_error',
-            random_state=42,
-            n_jobs=-1,
-            verbose=0
-        )
+        for name, spec in model_spaces.items():
+            print(f"\n--- Tuning {name} (20 iterations, 3-fold TimeSeriesSplit) ---")
+            
+            search = RandomizedSearchCV(
+                estimator=spec['estimator'],
+                param_distributions=spec['params'],
+                n_iter=20,
+                cv=tscv,
+                scoring='neg_mean_absolute_error',
+                random_state=42,
+                n_jobs=-1,
+                verbose=0
+            )
+            
+            search.fit(X_train, y_train)
+            
+            best_estimator = search.best_estimator_
+            preds = best_estimator.predict(X_test)
+            r2 = r2_score(y_test, preds)
+            mae = mean_absolute_error(y_test, preds)
+            rmse = np.sqrt(mean_squared_error(y_test, preds))
+            
+            print(f"  Best CV MAE: {-search.best_score_:.2f}")
+            print(f"  Test R2:     {r2:.4f}")
+            print(f"  Test MAE:    {mae:.2f} AQI")
+            print(f"  Test RMSE:   {rmse:.2f} AQI")
+            print(f"  Best params: {search.best_params_}")
+            
+            if hasattr(best_estimator, 'feature_importances_'):
+                fi = sorted(zip(feature_names, best_estimator.feature_importances_), 
+                           key=lambda x: x[1], reverse=True)
+                print(f"  Top 5 features:")
+                for fname, imp in fi[:5]:
+                    print(f"    {fname:30s} {imp:.4f}")
+            
+            results[name] = {
+                'model': best_estimator,
+                'best_params': search.best_params_,
+                'cv_mae': -search.best_score_,
+                'r2': r2, 'mae': mae, 'rmse': rmse,
+            }
+            
+            if mae < best_mae:
+                best_mae = mae
+                best_name = name
+    else:
+        # --- DEFAULT MODE: Use EDA-tuned params (fast) ---
+        tuned_models = get_tuned_models()
         
-        search.fit(X_train, y_train)
-        
-        # Evaluate best estimator on held-out test set
-        best_estimator = search.best_estimator_
-        preds = best_estimator.predict(X_test)
-        r2 = r2_score(y_test, preds)
-        mae = mean_absolute_error(y_test, preds)
-        rmse = np.sqrt(mean_squared_error(y_test, preds))
-        
-        print(f"  Best CV MAE: {-search.best_score_:.2f}")
-        print(f"  Test R2:     {r2:.4f}")
-        print(f"  Test MAE:    {mae:.2f} AQI")
-        print(f"  Test RMSE:   {rmse:.2f} AQI")
-        print(f"  Best params: {search.best_params_}")
-        
-        # Feature importance
-        if hasattr(best_estimator, 'feature_importances_'):
-            fi = sorted(zip(feature_names, best_estimator.feature_importances_), 
-                       key=lambda x: x[1], reverse=True)
-            print(f"  Top 5 features:")
-            for fname, imp in fi[:5]:
-                print(f"    {fname:30s} {imp:.4f}")
-        
-        results[name] = {
-            'model': best_estimator,
-            'best_params': search.best_params_,
-            'cv_mae': -search.best_score_,
-            'r2': r2, 'mae': mae, 'rmse': rmse,
-            'test_preds': preds
-        }
-        
-        if mae < best_mae:
-            best_mae = mae
-            best_name = name
+        for name, model in tuned_models.items():
+            print(f"\n--- Training {name} (EDA-tuned params) ---")
+            
+            model.fit(X_train, y_train)
+            preds = model.predict(X_test)
+            r2 = r2_score(y_test, preds)
+            mae = mean_absolute_error(y_test, preds)
+            rmse = np.sqrt(mean_squared_error(y_test, preds))
+            
+            print(f"  Test R2:     {r2:.4f}")
+            print(f"  Test MAE:    {mae:.2f} AQI")
+            print(f"  Test RMSE:   {rmse:.2f} AQI")
+            
+            if hasattr(model, 'feature_importances_'):
+                fi = sorted(zip(feature_names, model.feature_importances_), 
+                           key=lambda x: x[1], reverse=True)
+                print(f"  Top 5 features:")
+                for fname, imp in fi[:5]:
+                    print(f"    {fname:30s} {imp:.4f}")
+            
+            # Extract params from the model itself
+            model_params = model.get_params()
+            results[name] = {
+                'model': model,
+                'best_params': {k: v for k, v in model_params.items() 
+                               if k not in ('random_state', 'n_jobs', 'verbose', 'verbosity')},
+                'cv_mae': None,
+                'r2': r2, 'mae': mae, 'rmse': rmse,
+            }
+            
+            if mae < best_mae:
+                best_mae = mae
+                best_name = name
     
     # Retrain best params on full dataset and save
     print(f"\n{'='*70}")
@@ -307,11 +394,12 @@ def train_all_models():
             'best_params': serializable_params,
             'target': TARGET_COL,
             'training_date': datetime.now().isoformat(),
+            'training_mode': 'tuned' if tune else 'eda_params',
             'n_features': len(feature_names),
             'n_samples': len(X),
             'features': feature_names,
             'is_best': is_best,
-            'description': f'{name} targeting {TARGET_COL} (tuned via RandomizedSearchCV)'
+            'description': f'{name} targeting {TARGET_COL} ({"RandomizedSearchCV" if tune else "EDA-tuned params"})'
         }
         
         # Save with model name
@@ -323,21 +411,34 @@ def train_all_models():
     
     # Summary
     print(f"\n{'='*70}")
-    print(f"  TRAINING COMPLETE (with Hyperparameter Tuning)")
+    print(f"  TRAINING COMPLETE ({mode})")
     print(f"{'='*70}")
     print(f"\n  Results (evaluated on test set):")
-    print(f"  {'Model':<15} {'R2':>8} {'MAE':>8} {'RMSE':>8} {'CV MAE':>8} {'Best':>6}")
-    print(f"  {'-'*55}")
-    for name, r in results.items():
-        star = " <--" if name == best_name else ""
-        print(f"  {name:<15} {r['r2']:8.4f} {r['mae']:8.2f} {r['rmse']:8.2f} {r['cv_mae']:8.2f}  {star}")
+    if tune:
+        print(f"  {'Model':<15} {'R2':>8} {'MAE':>8} {'RMSE':>8} {'CV MAE':>8} {'Best':>6}")
+        print(f"  {'-'*55}")
+        for name, r in results.items():
+            star = " <--" if name == best_name else ""
+            print(f"  {name:<15} {r['r2']:8.4f} {r['mae']:8.2f} {r['rmse']:8.2f} {r['cv_mae']:8.2f}  {star}")
+    else:
+        print(f"  {'Model':<15} {'R2':>8} {'MAE':>8} {'RMSE':>8} {'Best':>6}")
+        print(f"  {'-'*47}")
+        for name, r in results.items():
+            star = " <--" if name == best_name else ""
+            print(f"  {name:<15} {r['r2']:8.4f} {r['mae']:8.2f} {r['rmse']:8.2f}  {star}")
     
     print(f"\n  Best model: {best_name} (MAE={best_mae:.2f})")
-    print(f"  Best params: {results[best_name]['best_params']}")
     print(f"  Saved as: 'best_model' in MongoDB registry")
     print(f"  Features: {feature_names}")
     print(f"{'='*70}")
 
 
 if __name__ == "__main__":
-    train_all_models()
+    # Use --tune flag to re-run hyperparameter search
+    # Default: fast training with EDA-tuned params
+    do_tune = '--tune' in sys.argv
+    if do_tune:
+        print("[MODE] Hyperparameter tuning enabled (this will take ~5-10 minutes)")
+    else:
+        print("[MODE] Using EDA-tuned params (fast). Use --tune to re-optimize.")
+    train_all_models(tune=do_tune)

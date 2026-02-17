@@ -152,19 +152,21 @@ This recursive approach means that prediction errors can compound over time, but
 
 ### Model Performance (After Hyperparameter Tuning)
 
-| Model | CV MAE | Test R² | Test MAE | Test RMSE | Status |
-|-------|--------|---------|----------|-----------|--------|
-| LightGBM | 10.02 | 0.8713 | 6.70 | 9.27 | — |
-| **XGBoost** | **10.14** | **0.8724** | **6.54** | **9.23** | **Best** |
-| RandomForest | 10.40 | 0.8522 | 7.10 | 9.94 | — |
+| Model | Test R² | Test MAE | Test RMSE | Status |
+|-------|---------|----------|-----------|--------|
+| **LightGBM** | **0.863** | **6.71** | **9.54** | **Best** |
+| XGBoost | 0.833 | 7.64 | 10.55 | — |
+| RandomForest | 0.740 | 10.35 | 13.18 | — |
 
-The best performing model (**XGBoost**) achieved a test MAE of **6.54 AQI points** and R² of **0.872**.
+> *Scores from the latest production training run. The best model varies as more data accumulates — during EDA (with less data), XGBoost was best; with the full dataset, LightGBM edges ahead.*
 
-On a 0–500 AQI scale, a MAE of ~6.5 points means the model is typically within one sub-category of the true reading. It reliably captures transitions between Good (0–50), Moderate (51–100), and Unhealthy for Sensitive Groups (101–150) — the three most common categories observed in Hyderabad.
+The best performing model (**LightGBM**) achieved a test MAE of **6.71 AQI points** and R² of **0.863**.
+
+On a 0–500 AQI scale, a MAE of ~6.7 points means the model is typically within one sub-category of the true reading. It reliably captures transitions between Good (0–50), Moderate (51–100), and Unhealthy for Sensitive Groups (101–150) — the three most common categories observed in Hyderabad.
 
 ### Most Important Features
 
-The feature importance analysis (from the tuned XGBoost model) confirms the EDA findings:
+The feature importance analysis (from the best LightGBM model) confirms the EDA findings:
 
 1. **us_aqi_rolling_mean_24h** — The 24-hour rolling average anchors predictions to recent trends
 2. **us_aqi_rolling_std_24h** — Captures volatility; high std means AQI is changing rapidly
@@ -278,7 +280,7 @@ A comprehensive EDA was conducted in `notebooks/EDA.ipynb` to validate every des
 5. **No Weekend Effect:** Weekday and weekend AQI are nearly identical, suggesting AQI in Hyderabad is driven by regional weather patterns, not local traffic.
 6. **PM2.5 Leakage:** PM2.5 has near-perfect correlation with US AQI (r ≈ 0.99) because AQI is derived from it. This confirmed the decision to exclude PM2.5 from features.
 7. **Continuous Data:** No time gaps in the dataset — hourly ingestion is working correctly.
-8. **Hyperparameter Tuning:** RandomizedSearchCV with TimeSeriesSplit validated that XGBoost slightly outperforms LightGBM after tuning, with both significantly beating RandomForest.
+8. **Hyperparameter Tuning:** RandomizedSearchCV with TimeSeriesSplit was used during EDA to find optimal params. The best params are baked into the training script for fast daily runs, with a `--tune` flag available for re-optimization.
 
 ---
 
