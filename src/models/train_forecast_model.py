@@ -2,12 +2,17 @@
 Train 3 Forecast Models - LightGBM, XGBoost, RandomForest
 ===========================================================
 Target: US AQI (0-500 scale)
-Features: Based on EDA findings (see eda_output.txt)
+Features: Based on EDA findings (see notebooks/EDA.ipynb)
 - Weather: temp, humidity, wind_speed, rain, weather_code
 - Pollutants: pm10, no2, ozone (NOT target - no leakage)
 - Time: cyclical + explicit hour markers
 - Lag: us_aqi_lag_24h, rolling_mean_24h, rolling_std_24h
 - Interactions: wind_x_temp, humidity_x_temp, etc.
+
+Hyperparameters are tuned dynamically via RandomizedSearchCV with
+TimeSeriesSplit cross-validation. No hardcoded params — the best
+configuration is selected each training run and stored in the
+model registry metadata.
 
 All 3 models are saved to MongoDB model registry.
 The best model (by MAE) is also saved as 'best_model'.
@@ -16,6 +21,7 @@ The best model (by MAE) is also saved as 'best_model'.
 import pandas as pd
 import numpy as np
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 import lightgbm as lgb
 from sklearn.ensemble import RandomForestRegressor
 from datetime import datetime
@@ -115,8 +121,8 @@ def prepare_data(df, target_col=TARGET_COL):
     return X, y, list(X.columns)
 
 
-def get_models():
-    """Define the 3 models to train."""
+def get_model_search_spaces():
+    """Define the 3 models with their hyperparameter search spaces."""
     try:
         import xgboost as xgb
         xgb_available = True
@@ -124,57 +130,57 @@ def get_models():
         xgb_available = False
         print("[WARNING] XGBoost not installed. pip install xgboost")
     
-    models = {}
+    spaces = {}
     
-    # 1. LightGBM (fast, good with categorical-like features)
-    models['LightGBM'] = lgb.LGBMRegressor(
-        n_estimators=500,
-        max_depth=8,
-        learning_rate=0.05,
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_samples=20,
-        reg_alpha=0.1,
-        reg_lambda=0.1,
-        random_state=42,
-        n_jobs=-1,
-        verbose=-1
-    )
+    # 1. LightGBM
+    spaces['LightGBM'] = {
+        'estimator': lgb.LGBMRegressor(random_state=42, n_jobs=-1, verbose=-1),
+        'params': {
+            'n_estimators': [200, 300, 500, 700],
+            'max_depth': [5, 8, 12, -1],
+            'learning_rate': [0.01, 0.03, 0.05, 0.1],
+            'subsample': [0.7, 0.8, 0.9, 1.0],
+            'colsample_bytree': [0.7, 0.8, 0.9, 1.0],
+            'min_child_samples': [10, 20, 30, 50],
+            'reg_alpha': [0.0, 0.01, 0.1, 1.0],
+            'reg_lambda': [0.0, 0.01, 0.1, 1.0],
+        }
+    }
     
-    # 2. XGBoost (strong gradient boosting)
+    # 2. XGBoost
     if xgb_available:
-        models['XGBoost'] = xgb.XGBRegressor(
-            n_estimators=500,
-            max_depth=8,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            min_child_samples=20,
-            reg_alpha=0.1,
-            reg_lambda=0.1,
-            random_state=42,
-            n_jobs=-1,
-            verbosity=0
-        )
+        spaces['XGBoost'] = {
+            'estimator': xgb.XGBRegressor(random_state=42, n_jobs=-1, verbosity=0),
+            'params': {
+                'n_estimators': [200, 300, 500, 700],
+                'max_depth': [5, 8, 12, 15],
+                'learning_rate': [0.01, 0.03, 0.05, 0.1],
+                'subsample': [0.7, 0.8, 0.9, 1.0],
+                'colsample_bytree': [0.7, 0.8, 0.9, 1.0],
+                'reg_alpha': [0.0, 0.01, 0.1, 1.0],
+                'reg_lambda': [0.0, 0.01, 0.1, 1.0],
+            }
+        }
     
-    # 3. RandomForest (robust baseline)
-    models['RandomForest'] = RandomForestRegressor(
-        n_estimators=300,
-        max_depth=15,
-        min_samples_split=10,
-        min_samples_leaf=5,
-        max_features='sqrt',
-        random_state=42,
-        n_jobs=-1
-    )
+    # 3. RandomForest
+    spaces['RandomForest'] = {
+        'estimator': RandomForestRegressor(random_state=42, n_jobs=-1),
+        'params': {
+            'n_estimators': [200, 300, 500],
+            'max_depth': [10, 15, 20, None],
+            'min_samples_split': [5, 10, 20],
+            'min_samples_leaf': [3, 5, 10],
+            'max_features': ['sqrt', 0.5, 0.8],
+        }
+    }
     
-    return models
+    return spaces
 
 
 def train_all_models():
-    """Train all 3 models and save to registry."""
+    """Train all 3 models with RandomizedSearchCV and save to registry."""
     print("\n" + "=" * 70)
-    print("  TRAINING 3 FORECAST MODELS")
+    print("  TRAINING 3 FORECAST MODELS (with Hyperparameter Tuning)")
     print(f"  Target: {TARGET_COL}")
     print("=" * 70)
     
@@ -210,37 +216,56 @@ def train_all_models():
     
     print(f"Train: {len(X_train)} | Test: {len(X_test)}")
     
-    # Train each model
-    models = get_models()
+    # TimeSeriesSplit for cross-validation (respects temporal order)
+    tscv = TimeSeriesSplit(n_splits=3)
+    
+    # Get model search spaces
+    model_spaces = get_model_search_spaces()
     results = {}
     best_mae = float('inf')
     best_name = None
     
-    for name, model in models.items():
-        print(f"\n--- Training {name} ---")
+    for name, spec in model_spaces.items():
+        print(f"\n--- Tuning {name} (20 iterations, 3-fold TimeSeriesSplit) ---")
         
-        model.fit(X_train, y_train)
+        search = RandomizedSearchCV(
+            estimator=spec['estimator'],
+            param_distributions=spec['params'],
+            n_iter=20,
+            cv=tscv,
+            scoring='neg_mean_absolute_error',
+            random_state=42,
+            n_jobs=-1,
+            verbose=0
+        )
         
-        # Evaluate on test set
-        preds = model.predict(X_test)
+        search.fit(X_train, y_train)
+        
+        # Evaluate best estimator on held-out test set
+        best_estimator = search.best_estimator_
+        preds = best_estimator.predict(X_test)
         r2 = r2_score(y_test, preds)
         mae = mean_absolute_error(y_test, preds)
         rmse = np.sqrt(mean_squared_error(y_test, preds))
         
-        print(f"  R2:   {r2:.4f}")
-        print(f"  MAE:  {mae:.2f} AQI")
-        print(f"  RMSE: {rmse:.2f} AQI")
+        print(f"  Best CV MAE: {-search.best_score_:.2f}")
+        print(f"  Test R2:     {r2:.4f}")
+        print(f"  Test MAE:    {mae:.2f} AQI")
+        print(f"  Test RMSE:   {rmse:.2f} AQI")
+        print(f"  Best params: {search.best_params_}")
         
         # Feature importance
-        if hasattr(model, 'feature_importances_'):
-            fi = sorted(zip(feature_names, model.feature_importances_), 
+        if hasattr(best_estimator, 'feature_importances_'):
+            fi = sorted(zip(feature_names, best_estimator.feature_importances_), 
                        key=lambda x: x[1], reverse=True)
             print(f"  Top 5 features:")
             for fname, imp in fi[:5]:
                 print(f"    {fname:30s} {imp:.4f}")
         
         results[name] = {
-            'model': model,
+            'model': best_estimator,
+            'best_params': search.best_params_,
+            'cv_mae': -search.best_score_,
             'r2': r2, 'mae': mae, 'rmse': rmse,
             'test_preds': preds
         }
@@ -249,30 +274,44 @@ def train_all_models():
             best_mae = mae
             best_name = name
     
-    # Retrain all on full dataset and save
+    # Retrain best params on full dataset and save
     print(f"\n{'='*70}")
     print(f"  RETRAINING ON FULL DATA & SAVING TO REGISTRY")
     print(f"{'='*70}")
     
-    for name, model in models.items():
-        print(f"\n  Saving {name}...")
-        model.fit(X, y)  # Full data retrain
+    for name, r in results.items():
+        print(f"\n  Retraining {name} with tuned params on full data...")
+        model = r['model']
+        model.fit(X, y)  # Full data retrain with best params
         
-        r = results[name]
         is_best = (name == best_name)
+        
+        # Convert best_params values to JSON-serializable types
+        serializable_params = {}
+        for k, v in r['best_params'].items():
+            if isinstance(v, (np.integer,)):
+                serializable_params[k] = int(v)
+            elif isinstance(v, (np.floating,)):
+                serializable_params[k] = float(v)
+            elif v is None:
+                serializable_params[k] = None
+            else:
+                serializable_params[k] = v
         
         metrics = {
             'model_name': name,
             'r2': r['r2'],
             'mae': r['mae'],
             'rmse': r['rmse'],
+            'cv_mae': r['cv_mae'],
+            'best_params': serializable_params,
             'target': TARGET_COL,
             'training_date': datetime.now().isoformat(),
             'n_features': len(feature_names),
             'n_samples': len(X),
             'features': feature_names,
             'is_best': is_best,
-            'description': f'{name} targeting {TARGET_COL}'
+            'description': f'{name} targeting {TARGET_COL} (tuned via RandomizedSearchCV)'
         }
         
         # Save with model name
@@ -284,16 +323,17 @@ def train_all_models():
     
     # Summary
     print(f"\n{'='*70}")
-    print(f"  TRAINING COMPLETE")
+    print(f"  TRAINING COMPLETE (with Hyperparameter Tuning)")
     print(f"{'='*70}")
     print(f"\n  Results (evaluated on test set):")
-    print(f"  {'Model':<15} {'R2':>8} {'MAE':>8} {'RMSE':>8} {'Best':>6}")
-    print(f"  {'-'*47}")
+    print(f"  {'Model':<15} {'R2':>8} {'MAE':>8} {'RMSE':>8} {'CV MAE':>8} {'Best':>6}")
+    print(f"  {'-'*55}")
     for name, r in results.items():
         star = " <--" if name == best_name else ""
-        print(f"  {name:<15} {r['r2']:8.4f} {r['mae']:8.2f} {r['rmse']:8.2f}  {star}")
+        print(f"  {name:<15} {r['r2']:8.4f} {r['mae']:8.2f} {r['rmse']:8.2f} {r['cv_mae']:8.2f}  {star}")
     
     print(f"\n  Best model: {best_name} (MAE={best_mae:.2f})")
+    print(f"  Best params: {results[best_name]['best_params']}")
     print(f"  Saved as: 'best_model' in MongoDB registry")
     print(f"  Features: {feature_names}")
     print(f"{'='*70}")

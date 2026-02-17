@@ -35,7 +35,8 @@ def save_model(model, metrics, model_name='best_model'):
         "version": version,
         "features": getattr(model, "feature_names_in_", []).tolist() if hasattr(model, "feature_names_in_") else [],
         "training_date": datetime.now().isoformat(),
-        "model_type": type(model).__name__
+        "model_type": type(model).__name__,
+        "best_params": metrics.get("best_params", {})
     }
     
     # Save to GridFS
@@ -79,6 +80,7 @@ def save_all_models(models_dict, best_model_name):
             'r2_score': metrics['r2'],
             'mae': metrics['mae'],
             'rmse': metrics['rmse'],
+            'best_params': metrics.get('best_params', {}),
             'is_best': (model_name == best_model_name),
             'training_date': timestamp,
             'version': version
@@ -102,7 +104,8 @@ def save_all_models(models_dict, best_model_name):
                 "features": getattr(model, "feature_names_in_", []).tolist() if hasattr(model, "feature_names_in_") else [],
                 "training_date": timestamp.isoformat(),
                 "model_type": type(model).__name__,
-                "is_best": (model_name == best_model_name)
+                "is_best": (model_name == best_model_name),
+                "best_params": metrics.get("best_params", {})
             }
             
             # Save with model_name as filename (e.g., 'RandomForest', 'XGBoost', 'LightGBM')

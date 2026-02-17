@@ -448,7 +448,7 @@ st.markdown("""
 <div style='text-align: center; color: gray; padding: 20px;'>
     <p>📡 Data Source: <a href='https://open-meteo.com' target='_blank'>Open-Meteo API</a></p>
     <p>📍 Location: Hyderabad, Sindh, Pakistan (25.3960°N, 68.3578°E)</p>
-    <p>🔄 Models retrain daily at 1:00 AM PKT with updated data</p>
-    <p>🤖 Best model selected based on R² score</p>
+    <p>🔄 Models retrain daily at 1:00 AM PKT with hyperparameter tuning</p>
+    <p>🤖 Best model selected dynamically based on MAE</p>
 </div>
 """, unsafe_allow_html=True)
