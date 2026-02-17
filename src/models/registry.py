@@ -6,9 +6,12 @@ Handles saving and loading multiple models with versioning
 import joblib
 import io
 import gridfs
-from datetime import datetime
+from datetime import datetime, timedelta
 from src.database import get_db_client
 import src.config as config
+
+# How many days of model history to keep in MongoDB
+MODEL_RETENTION_DAYS = 4
 
 
 def save_model(model, metrics, model_name='best_model'):
@@ -50,23 +53,25 @@ def save_model(model, metrics, model_name='best_model'):
     
     fs.put(model_binary, filename=model_name, metadata=metadata)
     
-    # Also update the model_registry collection (used by dashboard for metrics display)
+    # Insert a NEW record into model_registry (keeps history for comparison)
     # Skip 'best_model' alias to avoid duplicate entries
     if model_name != 'best_model':
-        collection.update_one(
-            {'model_name': model_name},
-            {'$set': {
-                'model_name': model_name,
-                'r2_score': metrics.get('r2', 0),
-                'mae': metrics.get('mae', 0),
-                'rmse': metrics.get('rmse', 0),
-                'best_params': metrics.get('best_params', {}),
-                'is_best': metrics.get('is_best', False),
-                'training_date': timestamp,
-                'version': version,
-            }},
-            upsert=True
-        )
+        collection.insert_one({
+            'model_name': model_name,
+            'r2_score': metrics.get('r2', 0),
+            'mae': metrics.get('mae', 0),
+            'rmse': metrics.get('rmse', 0),
+            'best_params': metrics.get('best_params', {}),
+            'is_best': metrics.get('is_best', False),
+            'training_date': timestamp,
+            'version': version,
+        })
+    
+    # Clean up old records (older than RETENTION_DAYS) to save storage
+    cutoff = datetime.now() - timedelta(days=MODEL_RETENTION_DAYS)
+    deleted = collection.delete_many({'training_date': {'$lt': cutoff}})
+    if deleted.deleted_count > 0:
+        print(f"🧹 Cleaned up {deleted.deleted_count} model record(s) older than {MODEL_RETENTION_DAYS} days")
     
     print(f"✅ Model '{model_name}' saved to GridFS (Version: {version})")
 
@@ -177,20 +182,35 @@ def load_latest_model(model_name='best_model'):
 
 def get_all_model_metrics():
     """
-    Retrieves metrics for all models from the latest training session.
+    Retrieves the LATEST metrics for each model_name from model history.
+    Uses MongoDB aggregation to pick the most recent record per model.
     
     Returns:
-        List of dictionaries containing model metrics
+        List of dictionaries containing model metrics (one per model_name),
+        sorted by r2_score descending.
     """
     db = get_db_client()
     collection = db[config.MODEL_COLLECTION]
     
-    # Since we upsert one record per model_name, just return all records
-    models = list(collection.find(
-        {},
-        {'_id': 0}
-    ).sort('r2_score', -1))
+    # Aggregate: sort by training_date desc, group by model_name, take first (latest)
+    pipeline = [
+        {'$sort': {'training_date': -1}},
+        {'$group': {
+            '_id': '$model_name',
+            'model_name': {'$first': '$model_name'},
+            'r2_score': {'$first': '$r2_score'},
+            'mae': {'$first': '$mae'},
+            'rmse': {'$first': '$rmse'},
+            'best_params': {'$first': '$best_params'},
+            'is_best': {'$first': '$is_best'},
+            'training_date': {'$first': '$training_date'},
+            'version': {'$first': '$version'},
+        }},
+        {'$sort': {'r2_score': -1}},
+        {'$project': {'_id': 0}}
+    ]
     
+    models = list(collection.aggregate(pipeline))
     return models
 
 
