@@ -13,7 +13,8 @@ import src.config as config
 
 def save_model(model, metrics, model_name='best_model'):
     """
-    Saves a trained model to MongoDB using GridFS.
+    Saves a trained model to MongoDB using GridFS AND updates the
+    model_registry collection with metrics for the dashboard.
     
     Args:
         model: Trained sklearn/xgboost/lightgbm model
@@ -22,6 +23,7 @@ def save_model(model, metrics, model_name='best_model'):
     """
     db = get_db_client()
     fs = gridfs.GridFS(db)
+    collection = db[config.MODEL_COLLECTION]
     
     # Serialize model to bytes
     model_buffer = io.BytesIO()
@@ -29,18 +31,37 @@ def save_model(model, metrics, model_name='best_model'):
     model_binary = model_buffer.getvalue()
     
     # Create metadata
-    version = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now()
+    version = timestamp.strftime("%Y%m%d_%H%M%S")
     metadata = {
         "metrics": metrics,
         "version": version,
         "features": getattr(model, "feature_names_in_", []).tolist() if hasattr(model, "feature_names_in_") else [],
-        "training_date": datetime.now().isoformat(),
+        "training_date": timestamp.isoformat(),
         "model_type": type(model).__name__,
         "best_params": metrics.get("best_params", {})
     }
     
     # Save to GridFS
     fs.put(model_binary, filename=model_name, metadata=metadata)
+    
+    # Also update the model_registry collection (used by dashboard for metrics display)
+    # Skip 'best_model' alias to avoid duplicate entries
+    if model_name != 'best_model':
+        collection.update_one(
+            {'model_name': model_name},
+            {'$set': {
+                'model_name': model_name,
+                'r2_score': metrics.get('r2', 0),
+                'mae': metrics.get('mae', 0),
+                'rmse': metrics.get('rmse', 0),
+                'best_params': metrics.get('best_params', {}),
+                'is_best': metrics.get('is_best', False),
+                'training_date': timestamp,
+                'version': version,
+            }},
+            upsert=True
+        )
     
     print(f"✅ Model '{model_name}' saved to GridFS (Version: {version})")
 

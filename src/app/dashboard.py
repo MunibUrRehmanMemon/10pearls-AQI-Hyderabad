@@ -189,7 +189,7 @@ if model_metrics:
                 st.info(f"**{model_name}**")
             
             st.metric("R² Score", f"{r2:.4f}")
-            st.metric("MAE", f"{mae:.2f} µg/m³")
+            st.metric("MAE", f"{mae:.2f} AQI points")
             
     # Training date
     if best_model_info:
