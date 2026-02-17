@@ -20,13 +20,13 @@ Three models are trained daily using EDA-tuned hyperparameters. The best model i
 
 | Model | R² | MAE | RMSE | Status |
 |-------|-----|-----|------|--------|
-| **LightGBM** | 0.863 | 6.71 | 9.54 | Best |
-| XGBoost | 0.833 | 7.64 | 10.55 | — |
-| RandomForest | 0.740 | 10.35 | 13.18 | — |
+| **LightGBM** | 0.875 | 6.57 | 9.11 | Best |
+| XGBoost | 0.871 | 6.76 | 9.27 | — |
+| RandomForest | 0.852 | 7.07 | 9.93 | — |
 
 > These scores reflect the latest production training run. Since training happens daily with fresh data, exact values shift slightly over time. The hyperparameters were tuned once during EDA and are reused for fast, reliable daily training.
 
-On a 0–500 AQI scale, a MAE of ~6.7 points means the model is typically within one sub-category of the true reading. LightGBM reliably captures transitions between Good, Moderate, and Unhealthy for Sensitive Groups — the three most common categories in Hyderabad.
+On a 0–500 AQI scale, a MAE of ~6.6 points means the model is typically within one sub-category of the true reading. LightGBM reliably captures transitions between Good, Moderate, and Unhealthy for Sensitive Groups — the three most common categories in Hyderabad.
 
 ---
 

@@ -42,7 +42,12 @@ def save_model(model, metrics, model_name='best_model'):
         "best_params": metrics.get("best_params", {})
     }
     
-    # Save to GridFS
+    # Save to GridFS (delete old versions first to avoid filling 512MB M0 limit)
+    old_files = list(db['fs.files'].find({'filename': model_name}).sort('uploadDate', -1))
+    if old_files:
+        for old in old_files:
+            fs.delete(old['_id'])
+    
     fs.put(model_binary, filename=model_name, metadata=metadata)
     
     # Also update the model_registry collection (used by dashboard for metrics display)

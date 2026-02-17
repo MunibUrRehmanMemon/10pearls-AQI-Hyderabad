@@ -154,15 +154,15 @@ This recursive approach means that prediction errors can compound over time, but
 
 | Model | Test R² | Test MAE | Test RMSE | Status |
 |-------|---------|----------|-----------|--------|
-| **LightGBM** | **0.863** | **6.71** | **9.54** | **Best** |
-| XGBoost | 0.833 | 7.64 | 10.55 | — |
-| RandomForest | 0.740 | 10.35 | 13.18 | — |
+| **LightGBM** | **0.875** | **6.57** | **9.11** | **Best** |
+| XGBoost | 0.871 | 6.76 | 9.27 | — |
+| RandomForest | 0.852 | 7.07 | 9.93 | — |
 
-> *Scores from the latest production training run. The best model varies as more data accumulates — during EDA (with less data), XGBoost was best; with the full dataset, LightGBM edges ahead.*
+> *Scores from the latest production training run using EDA-tuned hyperparameters. All three models perform closely after proper tuning.*
 
-The best performing model (**LightGBM**) achieved a test MAE of **6.71 AQI points** and R² of **0.863**.
+The best performing model (**LightGBM**) achieved a test MAE of **6.57 AQI points** and R² of **0.875**.
 
-On a 0–500 AQI scale, a MAE of ~6.7 points means the model is typically within one sub-category of the true reading. It reliably captures transitions between Good (0–50), Moderate (51–100), and Unhealthy for Sensitive Groups (101–150) — the three most common categories observed in Hyderabad.
+On a 0–500 AQI scale, a MAE of ~6.6 points means the model is typically within one sub-category of the true reading. It reliably captures transitions between Good (0–50), Moderate (51–100), and Unhealthy for Sensitive Groups (101–150) — the three most common categories observed in Hyderabad.
 
 ### Most Important Features
 

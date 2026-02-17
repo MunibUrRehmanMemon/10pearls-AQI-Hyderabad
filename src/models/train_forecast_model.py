@@ -142,25 +142,25 @@ def get_tuned_models():
     
     # 1. LightGBM — EDA best params
     models['LightGBM'] = lgb.LGBMRegressor(
-        n_estimators=500, max_depth=12, learning_rate=0.03,
-        subsample=0.8, colsample_bytree=0.8, min_child_samples=20,
-        reg_alpha=0.01, reg_lambda=0.1,
+        n_estimators=500, max_depth=-1, learning_rate=0.05,
+        subsample=0.7, colsample_bytree=0.9, min_child_samples=30,
+        reg_alpha=1.0, reg_lambda=1.0,
         random_state=42, n_jobs=-1, verbose=-1
     )
     
     # 2. XGBoost — EDA best params
     if xgb_available:
         models['XGBoost'] = xgb.XGBRegressor(
-            n_estimators=700, max_depth=8, learning_rate=0.03,
+            n_estimators=300, max_depth=5, learning_rate=0.1,
             subsample=0.9, colsample_bytree=0.8,
-            reg_alpha=0.01, reg_lambda=0.1,
+            reg_alpha=0.1, reg_lambda=0.01,
             random_state=42, n_jobs=-1, verbosity=0
         )
     
     # 3. RandomForest — EDA best params
     models['RandomForest'] = RandomForestRegressor(
-        n_estimators=500, max_depth=20, min_samples_split=5,
-        min_samples_leaf=3, max_features='sqrt',
+        n_estimators=200, max_depth=15, min_samples_split=5,
+        min_samples_leaf=5, max_features=0.8,
         random_state=42, n_jobs=-1
     )
     
