@@ -185,17 +185,9 @@ def get_all_model_metrics():
     db = get_db_client()
     collection = db[config.MODEL_COLLECTION]
     
-    # Get the latest training session
-    latest_doc = collection.find_one(sort=[('training_date', -1)])
-    
-    if not latest_doc:
-        return []
-    
-    latest_date = latest_doc['training_date']
-    
-    # Get all models from that session
+    # Since we upsert one record per model_name, just return all records
     models = list(collection.find(
-        {'training_date': latest_date},
+        {},
         {'_id': 0}
     ).sort('r2_score', -1))
     
