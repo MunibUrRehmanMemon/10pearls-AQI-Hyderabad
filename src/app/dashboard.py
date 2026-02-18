@@ -195,7 +195,10 @@ if model_metrics:
     if best_model_info:
         train_date = best_model_info.get('training_date')
         if train_date:
-            st.caption(f"Last trained: {pd.to_datetime(train_date).strftime('%Y-%m-%d %H:%M')}")
+            # Convert UTC timestamp to PKT (UTC+5) for display
+            from datetime import timedelta as td
+            pkt_time = pd.to_datetime(train_date) + td(hours=5)
+            st.caption(f"Last trained: {pkt_time.strftime('%Y-%m-%d %H:%M')} PKT")
 else:
     st.warning("⚠️ No model metrics found. Models need to be trained first.")
 

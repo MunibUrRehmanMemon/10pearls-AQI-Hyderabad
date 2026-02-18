@@ -33,8 +33,8 @@ def save_model(model, metrics, model_name='best_model'):
     joblib.dump(model, model_buffer)
     model_binary = model_buffer.getvalue()
     
-    # Create metadata
-    timestamp = datetime.now()
+    # Create metadata (always UTC for consistency across local & GitHub Actions)
+    timestamp = datetime.utcnow()
     version = timestamp.strftime("%Y%m%d_%H%M%S")
     metadata = {
         "metrics": metrics,
@@ -68,7 +68,7 @@ def save_model(model, metrics, model_name='best_model'):
         })
     
     # Clean up old records (older than RETENTION_DAYS) to save storage
-    cutoff = datetime.now() - timedelta(days=MODEL_RETENTION_DAYS)
+    cutoff = datetime.utcnow() - timedelta(days=MODEL_RETENTION_DAYS)
     deleted = collection.delete_many({'training_date': {'$lt': cutoff}})
     if deleted.deleted_count > 0:
         print(f"🧹 Cleaned up {deleted.deleted_count} model record(s) older than {MODEL_RETENTION_DAYS} days")
@@ -97,8 +97,8 @@ def save_all_models(models_dict, best_model_name):
     except Exception as e:
         print(f"⚠️ Warning: Could not clear old model data: {e}")
     
-    # Save metadata and models for ALL models
-    timestamp = datetime.now()
+    # Save metadata and models for ALL models (always UTC)
+    timestamp = datetime.utcnow()
     version = timestamp.strftime("%Y%m%d_%H%M%S")
     
     for model_name, model_info in models_dict.items():
