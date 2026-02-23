@@ -104,7 +104,7 @@ Each model is tuned using **RandomizedSearchCV** with **TimeSeriesSplit** cross-
 
 **Why RandomizedSearchCV instead of GridSearchCV?**
 - A full grid search across all three models would take 1–2 hours
-- Randomized search with 20 iterations per model completes in ~10–15 minutes
+- Randomized search with 20 iterations per model completes in 25+ minutes
 - This matters because the training pipeline runs daily on GitHub Actions with a 30-minute timeout
 - Research by Bergstra & Bengio (2012) showed that randomized search finds comparably good hyperparameters in a fraction of the time
 
