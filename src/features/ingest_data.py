@@ -109,7 +109,14 @@ def fetch_open_meteo_historical(start_date, end_date):
     df['city'] = "Hyderabad"
     
     # Fill missing values
-    df = df.infer_objects(copy=False).interpolate(method='linear').bfill().ffill()
+    # 1. Identify which columns are actually numbers
+    numeric_df = df.select_dtypes(include=['number'])
+    
+    # 2. Interpolate only those numbers
+    df[numeric_df.columns] = numeric_df.interpolate(method='linear')
+    
+    # 3. Use bfill/ffill on everything (works for both strings and numbers)
+    df = df.bfill().ffill()
     
     return df
 
